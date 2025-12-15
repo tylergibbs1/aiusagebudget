@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"C:\\Users\\tyler\\OneDrive\\Desktop\\aiusagebudget\")",
+      "Bash(tree:*)",
+      "Bash(dir /s \"C:\\Users\\tyler\\OneDrive\\Desktop\\aiusagebudget\")",
+      "Bash(dir:*)"
+    ]
+  }
+}
