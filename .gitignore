@@ -49,3 +49,6 @@ desktop.ini
 # Environment variables
 .env
 .env.local
+
+# Machine-specific identifier (should be unique per machine)
+.machine_id

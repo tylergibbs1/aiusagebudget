@@ -1,62 +1,48 @@
 #!/usr/bin/env python3
 """
 AI Usage Budget Tracker
-Tracks Claude AI usage across Windows and macOS using bunx ccusage.
-Updates a single Excel file with daily, weekly, and monthly TOTALS.
-Tracks both OS separately and shows combined totals.
+Tracks Claude AI usage across multiple machines using bunx ccusage.
+Simple format: Daily and Monthly views with totals.
 """
 
 import subprocess
 import json
+import hashlib
 import platform
 import sys
-from datetime import datetime
+import uuid
+
 from pathlib import Path
 from openpyxl import Workbook, load_workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 # Constants
 EXCEL_FILE = "usage_tracker.xlsx"
-SHEET_NAMES = ["Daily", "Weekly", "Monthly"]
 
-# Column headers - now includes OS label column
-HEADERS = [
-    "OS", "Input Tokens", "Output Tokens", "Cache Creation Tokens",
-    "Cache Read Tokens", "Total Tokens", "Cost ($)", "Last Updated"
-]
+# Simple column headers
+HEADERS = ["Date", "Machine", "Tokens", "Cost ($)"]
 
-# Row identifiers
-OS_ROWS = {
-    "Windows": 2,
-    "macOS": 3,
-    "Combined": 4
-}
+# Totals row label
+TOTALS_LABEL = "TOTALS"
 
 
-def detect_os():
-    """Detect the current operating system."""
-    system = platform.system()
-    if system == "Darwin":
-        return "macOS"
-    elif system == "Windows":
-        return "Windows"
-    else:
-        return system
+def get_machine_id():
+    """Get a deterministic machine identifier based on hostname + MAC address."""
+    hostname = platform.node()
+    mac = uuid.getnode()  # Gets MAC address as integer
+
+    # Create deterministic hash from hostname + MAC
+    machine_str = f"{hostname}-{mac}"
+    hash_bytes = hashlib.sha256(machine_str.encode()).hexdigest()[:8]
+
+    return f"{hostname}-{hash_bytes}"
 
 
 def fetch_usage_data(period):
-    """
-    Fetch usage data from bunx ccusage for the given period.
-
-    Args:
-        period: One of 'daily', 'weekly', or 'monthly'
-
-    Returns:
-        Totals dict or None if error
-    """
+    """Fetch usage data from bunx ccusage for the given period."""
     try:
-        print(f"Fetching {period} totals from ccusage...")
+        print(f"Fetching {period} data...")
         result = subprocess.run(
             ['bunx', 'ccusage', period, '--json'],
             capture_output=True,
@@ -66,261 +52,260 @@ def fetch_usage_data(period):
         )
 
         data = json.loads(result.stdout)
+        entries = data.get(period, [])
 
-        # Extract the totals
-        totals = data.get('totals', {})
-
-        if totals:
-            print(f"✓ Fetched {period} totals")
+        if entries:
+            print(f"  [OK] {len(entries)} entries")
         else:
-            print(f"✗ No totals found for {period}")
+            print(f"  [X] No entries found")
 
-        return totals
+        return entries
 
     except subprocess.CalledProcessError as e:
-        print(f"✗ Error running bunx ccusage {period}: {e}")
-        print(f"  Output: {e.stderr}")
+        print(f"  [X] Error: {e.stderr}")
         return None
     except json.JSONDecodeError as e:
-        print(f"✗ Error parsing JSON for {period}: {e}")
+        print(f"  [X] JSON parse error: {e}")
         return None
     except Exception as e:
-        print(f"✗ Unexpected error fetching {period} data: {e}")
+        print(f"  [X] Error: {e}")
         return None
 
 
 def load_or_create_workbook():
-    """Load existing workbook or create a new one with all sheets."""
+    """Load existing workbook or create a new one."""
     excel_path = Path(EXCEL_FILE)
 
     if excel_path.exists():
-        print(f"Loading existing workbook: {EXCEL_FILE}")
+        print(f"Loading: {EXCEL_FILE}")
         try:
-            wb = load_workbook(EXCEL_FILE)
-            return wb
+            return load_workbook(EXCEL_FILE)
         except Exception as e:
-            print(f"✗ Error loading workbook: {e}")
-            print("Creating new workbook instead...")
+            print(f"  [X] Error loading: {e}")
+            print("  Creating new workbook...")
 
-    print(f"Creating new workbook: {EXCEL_FILE}")
+    print(f"Creating: {EXCEL_FILE}")
     wb = Workbook()
 
     # Remove default sheet
     if 'Sheet' in wb.sheetnames:
         wb.remove(wb['Sheet'])
 
-    # Create all three sheets with headers
-    for sheet_name in SHEET_NAMES:
+    # Create Daily, Weekly, and Monthly sheets
+    for sheet_name in ["Daily", "Weekly", "Monthly"]:
         ws = wb.create_sheet(sheet_name)
-
-        # Write headers
-        for col_idx, header in enumerate(HEADERS, 1):
-            cell = ws.cell(row=1, column=col_idx, value=header)
-            cell.font = Font(bold=True)
-            cell.fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-
-        # Initialize the OS label column
-        ws.cell(row=2, column=1, value="Windows")
-        ws.cell(row=3, column=1, value="macOS")
-        ws.cell(row=4, column=1, value="Combined")
-        ws.cell(row=4, column=1).font = Font(bold=True)
-
-        # Freeze the header row
-        ws.freeze_panes = "A2"
+        setup_sheet_headers(ws)
 
     return wb
 
 
-def get_row_values(sheet, row_num):
-    """Get numeric values from a row (excluding OS label and timestamp)."""
-    values = []
-    # Columns 2-7 are the numeric columns (tokens and cost)
-    for col_idx in range(2, 8):
-        cell_value = sheet.cell(row=row_num, column=col_idx).value
-        values.append(cell_value if cell_value else 0)
-    return values
+def setup_sheet_headers(ws):
+    """Set up headers for a sheet."""
+    for col_idx, header in enumerate(HEADERS, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.freeze_panes = "A2"
 
 
-def update_sheet_with_totals(sheet, totals, os_name):
-    """Update sheet with totals for the current OS and recalculate combined."""
-    if not totals:
+def find_existing_row(sheet, date_str, machine_id):
+    """Find row with matching date and machine."""
+    for row_num in range(2, sheet.max_row + 1):
+        cell_date = sheet.cell(row=row_num, column=1).value
+        cell_machine = sheet.cell(row=row_num, column=2).value
+
+        if cell_date == TOTALS_LABEL:
+            continue
+
+        if str(cell_date) == str(date_str) and cell_machine == machine_id:
+            return row_num
+    return None
+
+
+def find_totals_row(sheet):
+    """Find the TOTALS row."""
+    for row_num in range(2, sheet.max_row + 1):
+        if sheet.cell(row=row_num, column=1).value == TOTALS_LABEL:
+            return row_num
+    return None
+
+
+def get_insert_position(sheet, date_str):
+    """Find position to insert new row (sorted by date)."""
+    totals_row = find_totals_row(sheet)
+    max_row = totals_row if totals_row else sheet.max_row + 1
+
+    for row_num in range(2, max_row):
+        cell_date = sheet.cell(row=row_num, column=1).value
+        if cell_date and str(cell_date) > str(date_str):
+            return row_num
+
+    return max_row
+
+
+def update_sheet(sheet, entries, machine_id):
+    """Update sheet with entries."""
+    if not entries:
         return False
 
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    rows_added = 0
+    rows_updated = 0
 
-    # Determine which row to update based on OS
-    row_num = OS_ROWS.get(os_name)
-    if not row_num:
-        print(f"✗ Unknown OS: {os_name}")
-        return False
+    for entry in entries:
+        date_str = entry.get('date') or entry.get('week') or entry.get('month', 'Unknown')
 
-    # Row data for current OS (starting from column 2, after OS label)
-    row_data = [
-        totals.get('inputTokens', 0),
-        totals.get('outputTokens', 0),
-        totals.get('cacheCreationTokens', 0),
-        totals.get('cacheReadTokens', 0),
-        totals.get('totalTokens', 0),
-        round(totals.get('totalCost', 0), 2),
-        timestamp
-    ]
+        existing_row = find_existing_row(sheet, date_str, machine_id)
 
-    # Update the OS-specific row (columns 2-8)
-    for col_idx, value in enumerate(row_data, 2):
-        sheet.cell(row=row_num, column=col_idx, value=value)
+        if existing_row:
+            row_num = existing_row
+            rows_updated += 1
+        else:
+            insert_pos = get_insert_position(sheet, date_str)
+            sheet.insert_rows(insert_pos)
+            row_num = insert_pos
+            rows_added += 1
 
-    # Recalculate combined totals (sum of Windows and macOS)
-    windows_values = get_row_values(sheet, OS_ROWS["Windows"])
-    macos_values = get_row_values(sheet, OS_ROWS["macOS"])
+        # Write simplified data
+        sheet.cell(row=row_num, column=1, value=date_str)
+        sheet.cell(row=row_num, column=2, value=machine_id)
+        sheet.cell(row=row_num, column=3, value=entry.get('totalTokens', 0))
+        sheet.cell(row=row_num, column=4, value=round(entry.get('totalCost', 0), 2))
 
-    combined_values = [w + m for w, m in zip(windows_values, macos_values)]
-    combined_values.append(timestamp)  # Add timestamp
-
-    # Update combined row (columns 2-8)
-    for col_idx, value in enumerate(combined_values, 2):
-        cell = sheet.cell(row=OS_ROWS["Combined"], column=col_idx, value=value)
-        # Round the cost column
-        if col_idx == 7:  # Cost column
-            cell.value = round(value, 2)
-
+    update_totals_row(sheet)
+    print(f"  Added {rows_added}, updated {rows_updated} rows")
     return True
+
+
+def update_totals_row(sheet):
+    """Calculate and update the totals row."""
+    totals_row = find_totals_row(sheet)
+
+    if not totals_row:
+        totals_row = sheet.max_row + 1
+
+    total_tokens = 0
+    total_cost = 0.0
+
+    for row_num in range(2, sheet.max_row + 1):
+        if sheet.cell(row=row_num, column=1).value == TOTALS_LABEL:
+            continue
+
+        total_tokens += sheet.cell(row=row_num, column=3).value or 0
+        total_cost += sheet.cell(row=row_num, column=4).value or 0
+
+    sheet.cell(row=totals_row, column=1, value=TOTALS_LABEL)
+    sheet.cell(row=totals_row, column=2, value="")
+    sheet.cell(row=totals_row, column=3, value=total_tokens)
+    sheet.cell(row=totals_row, column=4, value=round(total_cost, 2))
 
 
 def format_sheet(sheet):
     """Apply formatting to the sheet."""
-    # Auto-adjust column widths
-    for column in sheet.columns:
-        max_length = 0
-        column_letter = get_column_letter(column[0].column)
+    # Column widths
+    widths = [12, 28, 15, 12]
+    for idx, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(idx)].width = width
 
-        for cell in column:
-            try:
-                if cell.value:
-                    max_length = max(max_length, len(str(cell.value)))
-            except:
-                pass
+    # Format data rows
+    for row_num in range(2, sheet.max_row + 1):
+        date_val = sheet.cell(row=row_num, column=1).value
 
-        adjusted_width = min(max_length + 2, 50)  # Cap at 50
-        sheet.column_dimensions[column_letter].width = adjusted_width
+        # Right-align numeric columns
+        sheet.cell(row=row_num, column=3).alignment = Alignment(horizontal="right")
+        sheet.cell(row=row_num, column=4).alignment = Alignment(horizontal="right")
 
-    # Right-align numeric columns (columns 2-7: tokens and cost)
-    for row in sheet.iter_rows(min_row=2):
-        for idx, cell in enumerate(row):
-            # Right-align numeric columns (tokens, cost)
-            if 1 <= idx <= 6:  # Columns 2-7 (0-indexed in row array)
-                cell.alignment = Alignment(horizontal="right", vertical="center")
+        # Number formats
+        sheet.cell(row=row_num, column=3).number_format = '#,##0'
+        sheet.cell(row=row_num, column=4).number_format = '$#,##0.00'
 
-    # Add light yellow background to Combined row
-    for col_idx in range(1, 9):
-        cell = sheet.cell(row=OS_ROWS["Combined"], column=col_idx)
-        cell.fill = PatternFill(start_color="FFFACD", end_color="FFFACD", fill_type="solid")
-        if col_idx == 1:  # OS label column
-            cell.font = Font(bold=True)
+        # Style TOTALS row
+        if date_val == TOTALS_LABEL:
+            for col_idx in range(1, 5):
+                cell = sheet.cell(row=row_num, column=col_idx)
+                cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+                cell.font = Font(bold=True)
+                cell.border = Border(top=Side(style='thin'))
 
 
-def display_sheet_totals(sheet, sheet_name):
-    """Display totals from a sheet."""
-    print(f"\n{sheet_name} Totals:")
-    print("-" * 60)
+def display_summary(wb):
+    """Display summary."""
+    print("\n" + "=" * 45)
+    print("SUMMARY")
+    print("=" * 45)
 
-    for os_label, row_num in OS_ROWS.items():
-        total_tokens = sheet.cell(row=row_num, column=6).value or 0
-        total_cost = sheet.cell(row=row_num, column=7).value or 0
+    for sheet_name in ["Daily", "Weekly", "Monthly"]:
+        if sheet_name not in wb.sheetnames:
+            continue
 
-        indent = "  " if os_label != "Combined" else ""
-        bold = "**" if os_label == "Combined" else ""
+        sheet = wb[sheet_name]
+        totals_row = find_totals_row(sheet)
 
-        print(f"{indent}{bold}{os_label}:{bold}")
-        print(f"{indent}  Total Tokens: {total_tokens:,}")
-        print(f"{indent}  Total Cost: ${total_cost:.2f}")
+        if totals_row:
+            tokens = sheet.cell(row=totals_row, column=3).value or 0
+            cost = sheet.cell(row=totals_row, column=4).value or 0
+            entry_count = totals_row - 2
+
+            print(f"\n{sheet_name}: {entry_count} entries")
+            print(f"  Tokens: {tokens:,}")
+            print(f"  Cost:   ${cost:.2f}")
+
+    print("\n" + "=" * 45)
 
 
 def main():
     """Main execution flow."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 45)
     print("AI Usage Budget Tracker")
-    print("="*60 + "\n")
+    print("=" * 45)
 
-    # Detect OS
-    os_name = detect_os()
-    print(f"Operating System: {os_name}\n")
+    machine_id = get_machine_id()
+    print(f"Machine: {machine_id}\n")
 
-    # Fetch data from all three periods
-    print("Fetching usage totals from ccusage...\n")
-    daily_totals = fetch_usage_data('daily')
-    weekly_totals = fetch_usage_data('weekly')
-    monthly_totals = fetch_usage_data('monthly')
+    # Fetch data
+    daily_entries = fetch_usage_data('daily')
+    weekly_entries = fetch_usage_data('weekly')
+    monthly_entries = fetch_usage_data('monthly')
 
-    # Check if we got any data
-    if daily_totals is None and weekly_totals is None and monthly_totals is None:
-        print("\n✗ Failed to fetch any data. Please check your bunx ccusage installation.")
+    if not daily_entries and not weekly_entries and not monthly_entries:
+        print("\n[X] No data fetched. Check bunx ccusage.")
         sys.exit(1)
 
-    # Load or create workbook
-    print("\nUpdating Excel file...\n")
+    # Update workbook
+    print("\nUpdating Excel...")
     wb = load_or_create_workbook()
 
-    # Update each sheet
-    updated_sheets = []
+    if daily_entries:
+        print("Daily sheet:")
+        if "Daily" not in wb.sheetnames:
+            ws = wb.create_sheet("Daily")
+            setup_sheet_headers(ws)
+        update_sheet(wb["Daily"], daily_entries, machine_id)
+        format_sheet(wb["Daily"])
 
-    if daily_totals is not None:
-        daily_sheet = wb["Daily"]
-        if update_sheet_with_totals(daily_sheet, daily_totals, os_name):
-            format_sheet(daily_sheet)
-            updated_sheets.append("Daily")
-            print(f"✓ Updated Daily sheet ({os_name} + Combined)")
+    if weekly_entries:
+        print("Weekly sheet:")
+        if "Weekly" not in wb.sheetnames:
+            ws = wb.create_sheet("Weekly")
+            setup_sheet_headers(ws)
+        update_sheet(wb["Weekly"], weekly_entries, machine_id)
+        format_sheet(wb["Weekly"])
 
-    if weekly_totals is not None:
-        weekly_sheet = wb["Weekly"]
-        if update_sheet_with_totals(weekly_sheet, weekly_totals, os_name):
-            format_sheet(weekly_sheet)
-            updated_sheets.append("Weekly")
-            print(f"✓ Updated Weekly sheet ({os_name} + Combined)")
+    if monthly_entries:
+        print("Monthly sheet:")
+        if "Monthly" not in wb.sheetnames:
+            ws = wb.create_sheet("Monthly")
+            setup_sheet_headers(ws)
+        update_sheet(wb["Monthly"], monthly_entries, machine_id)
+        format_sheet(wb["Monthly"])
 
-    if monthly_totals is not None:
-        monthly_sheet = wb["Monthly"]
-        if update_sheet_with_totals(monthly_sheet, monthly_totals, os_name):
-            format_sheet(monthly_sheet)
-            updated_sheets.append("Monthly")
-            print(f"✓ Updated Monthly sheet ({os_name} + Combined)")
-
-    if not updated_sheets:
-        print("\n✗ No sheets were updated.")
-        sys.exit(1)
-
-    # Save workbook
+    # Save
     try:
         wb.save(EXCEL_FILE)
-        print(f"\n✓ Saved to {EXCEL_FILE}")
-
-        # Print summary
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        print(f"\nLast updated: {timestamp}")
-
-        # Display totals from each sheet
-        print("\n" + "="*60)
-        print("Current Totals (All Time):")
-        print("="*60)
-
-        if daily_totals:
-            display_sheet_totals(wb["Daily"], "Daily")
-
-        if weekly_totals:
-            display_sheet_totals(wb["Weekly"], "Weekly")
-
-        if monthly_totals:
-            display_sheet_totals(wb["Monthly"], "Monthly")
-
-        print("\n" + "="*60)
-        print("Done! You can now commit and push to GitHub:")
-        print(f"  git add {EXCEL_FILE}")
-        print(f'  git commit -m "Update usage totals from {os_name}"')
-        print("  git push")
-        print("="*60 + "\n")
-
+        print(f"\n[OK] Saved to {EXCEL_FILE}")
+        display_summary(wb)
     except Exception as e:
-        print(f"\n✗ Error saving workbook: {e}")
+        print(f"\n[X] Error saving: {e}")
         sys.exit(1)
 
 

@@ -4,7 +4,11 @@
       "Bash(dir \"C:\\Users\\tyler\\OneDrive\\Desktop\\aiusagebudget\")",
       "Bash(tree:*)",
       "Bash(dir /s \"C:\\Users\\tyler\\OneDrive\\Desktop\\aiusagebudget\")",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python track_usage.py:*)",
+      "Bash(del \"C:\\Users\\gibbst00\\aiusagebudget\\usage_tracker.xlsx\")",
+      "Bash(python -c:*)"
     ]
   }
 }
