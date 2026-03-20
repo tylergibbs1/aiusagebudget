@@ -20,9 +20,13 @@ from openpyxl.utils import get_column_letter
 
 # Constants
 EXCEL_FILE = "usage_tracker.xlsx"
+MONTHLY_SUBSCRIPTION = 200.00
 
 # Column headers for time-based sheets
 TIME_HEADERS = ["Date", "Machine", "Tokens", "Cost ($)"]
+
+# Column headers for monthly sheet (extends time headers with subscription comparison)
+MONTHLY_HEADERS = ["Date", "Machine", "Tokens", "API Cost ($)", "Subscription ($)", "Savings ($)"]
 
 # Column headers for machine totals sheet
 MACHINE_HEADERS = ["Machine", "Tokens", "Cost ($)"]
@@ -94,9 +98,13 @@ def load_or_create_workbook():
         wb.remove(wb['Sheet'])
 
     # Create time-based sheets
-    for sheet_name in ["Daily", "Weekly", "Monthly"]:
+    for sheet_name in ["Daily", "Weekly"]:
         ws = wb.create_sheet(sheet_name)
         setup_time_sheet_headers(ws)
+
+    # Create monthly sheet with subscription comparison columns
+    ws = wb.create_sheet("Monthly")
+    setup_monthly_sheet_headers(ws)
 
     # Create machine totals sheet
     ws = wb.create_sheet("Machine Totals")
@@ -108,6 +116,16 @@ def load_or_create_workbook():
 def setup_time_sheet_headers(ws):
     """Set up headers for time-based sheets."""
     for col_idx, header in enumerate(TIME_HEADERS, 1):
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.freeze_panes = "A2"
+
+
+def setup_monthly_sheet_headers(ws):
+    """Set up headers for the monthly sheet with subscription comparison."""
+    for col_idx, header in enumerate(MONTHLY_HEADERS, 1):
         cell = ws.cell(row=1, column=col_idx, value=header)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
@@ -234,7 +252,7 @@ def get_insert_position(sheet, date_str):
     return max_row
 
 
-def update_sheet(sheet, entries, machine_id):
+def update_sheet(sheet, entries, machine_id, is_monthly=False):
     """Update sheet with entries."""
     if not entries:
         return False
@@ -262,12 +280,47 @@ def update_sheet(sheet, entries, machine_id):
         sheet.cell(row=row_num, column=3, value=entry.get('totalTokens', 0))
         sheet.cell(row=row_num, column=4, value=entry.get('totalCost', 0))
 
-    update_totals_row(sheet)
+    if is_monthly:
+        backfill_monthly_subscription(sheet)
+    update_totals_row(sheet, is_monthly=is_monthly)
     print(f"  Added {rows_added}, updated {rows_updated} rows")
     return True
 
 
-def update_totals_row(sheet):
+def backfill_monthly_subscription(sheet):
+    """Fill subscription and savings columns for all monthly rows.
+
+    The $200/mo subscription covers all machines for a given month.
+    Each row stores: Subscription = $200 (flat per month, every row),
+    Savings = (API cost for this row's share).
+    The TOTALS row aggregates correctly: total API cost vs $200 × num_months.
+    """
+    # First pass: compute total API cost per month
+    month_totals = {}
+    for row_num in range(2, sheet.max_row + 1):
+        date_val = sheet.cell(row=row_num, column=1).value
+        if date_val == TOTALS_LABEL or date_val is None:
+            continue
+        month_key = normalize_date_str(date_val)
+        api_cost = sheet.cell(row=row_num, column=4).value or 0
+        if month_key not in month_totals:
+            month_totals[month_key] = {'total_api': 0, 'rows': []}
+        month_totals[month_key]['total_api'] += api_cost
+        month_totals[month_key]['rows'].append(row_num)
+
+    # Second pass: write subscription/savings per row
+    # Each row gets: Subscription = $200 / num_rows_in_month (so totals sum correctly)
+    # Savings = API cost - subscription share
+    for month_key, info in month_totals.items():
+        num_rows = len(info['rows'])
+        sub_per_row = MONTHLY_SUBSCRIPTION / num_rows
+        for row_num in info['rows']:
+            api_cost = sheet.cell(row=row_num, column=4).value or 0
+            sheet.cell(row=row_num, column=5, value=sub_per_row)
+            sheet.cell(row=row_num, column=6, value=api_cost - sub_per_row)
+
+
+def update_totals_row(sheet, is_monthly=False):
     """Calculate and update the totals row for time-based sheets."""
     totals_row = find_totals_row(sheet)
 
@@ -276,6 +329,7 @@ def update_totals_row(sheet):
 
     total_tokens = 0
     total_cost = 0.0
+    total_subscription = 0.0
 
     for row_num in range(2, sheet.max_row + 1):
         if sheet.cell(row=row_num, column=1).value == TOTALS_LABEL:
@@ -283,11 +337,17 @@ def update_totals_row(sheet):
 
         total_tokens += sheet.cell(row=row_num, column=3).value or 0
         total_cost += sheet.cell(row=row_num, column=4).value or 0
+        if is_monthly:
+            total_subscription += sheet.cell(row=row_num, column=5).value or 0
 
     sheet.cell(row=totals_row, column=1, value=TOTALS_LABEL)
     sheet.cell(row=totals_row, column=2, value="")
     sheet.cell(row=totals_row, column=3, value=total_tokens)
     sheet.cell(row=totals_row, column=4, value=total_cost)
+
+    if is_monthly:
+        sheet.cell(row=totals_row, column=5, value=total_subscription)
+        sheet.cell(row=totals_row, column=6, value=total_cost - total_subscription)
 
 
 def update_machine_totals(wb):
@@ -373,6 +433,46 @@ def format_time_sheet(sheet):
                 cell.border = Border(top=Side(style='thin'))
 
 
+def format_monthly_sheet(sheet):
+    """Apply formatting to the monthly sheet with subscription comparison columns."""
+    widths = [12, 28, 15, 14, 16, 14]
+    for idx, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(idx)].width = width
+
+    for row_num in range(2, sheet.max_row + 1):
+        date_val = sheet.cell(row=row_num, column=1).value
+
+        # Right-align numeric columns
+        for col in range(3, 7):
+            sheet.cell(row=row_num, column=col).alignment = Alignment(horizontal="right")
+
+        # Number formats
+        sheet.cell(row=row_num, column=3).number_format = '#,##0'
+        sheet.cell(row=row_num, column=4).number_format = '$#,##0.00'
+        sheet.cell(row=row_num, column=5).number_format = '$#,##0.00'
+        sheet.cell(row=row_num, column=6).number_format = '$#,##0.00'
+
+        # Color savings: green if positive (saving money), red if negative
+        savings_val = sheet.cell(row=row_num, column=6).value
+        if savings_val is not None and date_val != TOTALS_LABEL:
+            if savings_val > 0:
+                sheet.cell(row=row_num, column=6).font = Font(color="006100")
+            elif savings_val < 0:
+                sheet.cell(row=row_num, column=6).font = Font(color="9C0006")
+
+        # Style TOTALS row
+        if date_val == TOTALS_LABEL:
+            for col_idx in range(1, 7):
+                cell = sheet.cell(row=row_num, column=col_idx)
+                cell.fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
+                cell.font = Font(bold=True)
+                cell.border = Border(top=Side(style='thin'))
+            # Preserve savings color on totals row
+            if savings_val is not None:
+                color = "006100" if savings_val > 0 else "9C0006"
+                sheet.cell(row=row_num, column=6).font = Font(bold=True, color=color)
+
+
 def format_machine_sheet(sheet):
     """Apply formatting to machine totals sheet."""
     widths = [28, 15, 12]
@@ -419,7 +519,14 @@ def display_summary(wb):
 
             print(f"\n{sheet_name}: {entry_count} entries")
             print(f"  Tokens: {tokens:,}")
-            print(f"  Cost:   ${cost:.2f}")
+            print(f"  API Cost: ${cost:.2f}")
+
+            if sheet_name == "Monthly":
+                subscription = sheet.cell(row=totals_row, column=5).value or 0
+                savings = sheet.cell(row=totals_row, column=6).value or 0
+                print(f"  Subscription: ${subscription:.2f}")
+                sign = "+" if savings > 0 else ""
+                print(f"  Savings: {sign}${savings:.2f}")
 
     # Machine totals summary
     if "Machine Totals" in wb.sheetnames:
@@ -479,9 +586,10 @@ def main():
         print("Monthly sheet:")
         if "Monthly" not in wb.sheetnames:
             ws = wb.create_sheet("Monthly")
-            setup_time_sheet_headers(ws)
-        update_sheet(wb["Monthly"], monthly_entries, machine_id)
-        format_time_sheet(wb["Monthly"])
+        # Always ensure headers are correct (handles upgrades from old 4-col format)
+        setup_monthly_sheet_headers(wb["Monthly"])
+        update_sheet(wb["Monthly"], monthly_entries, machine_id, is_monthly=True)
+        format_monthly_sheet(wb["Monthly"])
 
     # Update machine totals (aggregates from Daily)
     update_machine_totals(wb)

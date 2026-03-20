@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Usage Budget Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a; --text: #e1e4ed;
+    --muted: #8b8fa3; --accent: #6c5ce7; --green: #00b894; --red: #e17055;
+    --blue: #0984e3; --yellow: #fdcb6e; --pink: #fd79a8; --cyan: #00cec9;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh; padding: 24px;
+  }
+  h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 24px; }
+  .kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+  .kpi { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .kpi-label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .kpi-value { font-size: 1.6rem; font-weight: 700; }
+  .kpi-value.green { color: #00b894; }
+  .kpi-sub { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .card-title { font-size: 0.95rem; font-weight: 600; margin-bottom: 16px; }
+  .card-full { grid-column: 1 / -1; }
+  .chart-container { position: relative; height: 300px; }
+  .chart-container-tall { position: relative; height: 350px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; }
+  td:nth-child(2), td:nth-child(3), th:nth-child(2), th:nth-child(3) { text-align: right; }
+  .bar-cell { display: flex; align-items: center; gap: 8px; }
+  .bar-bg { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .bar-fill { height: 100%; border-radius: 3px; }
+  .tab-row { display: flex; gap: 4px; margin-bottom: 16px; }
+  .tab { padding: 6px 16px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--muted); transition: all 0.15s; }
+  .tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } body { padding: 16px; } }
+</style>
+</head>
+<body>
+<h1>AI Usage Budget Dashboard</h1>
+<p class="subtitle">Token usage and cost tracking across machines &mdash; $200/mo Claude subscription vs API pricing</p>
+<div class="kpi-row" id="kpis"></div>
+<div class="grid">
+  <div class="card card-full">
+    <div class="card-title">Cost Over Time</div>
+    <div class="tab-row">
+      <button class="tab active" data-view="daily" onclick="switchCostView('daily')">Daily</button>
+      <button class="tab" data-view="weekly" onclick="switchCostView('weekly')">Weekly</button>
+      <button class="tab" data-view="monthly" onclick="switchCostView('monthly')">Monthly</button>
+    </div>
+    <div class="chart-container-tall"><canvas id="costChart"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Cost by Machine</div>
+    <div class="chart-container"><canvas id="machineChart"></canvas></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Monthly: API Cost vs $200/mo Subscription</div>
+    <div class="chart-container"><canvas id="savingsChart"></canvas></div>
+  </div>
+  <div class="card card-full">
+    <div class="card-title">Machine Breakdown</div>
+    <table id="machineTable">
+      <thead><tr><th>Machine</th><th>Tokens</th><th>API Cost</th><th style="width:40%">Share</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+<script>
+var DATA = {"Daily": [{"Date": "2025-11-14", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 550358, "Cost ($)": 1.3688}, {"Date": "2025-11-15", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 49724464, "Cost ($)": 39.0656}, {"Date": "2025-11-16", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 1908261, "Cost ($)": 1.1572}, {"Date": "2025-11-16", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 21866795, "Cost ($)": 10.7059}, {"Date": "2025-11-17", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 32022530, "Cost ($)": 23.2974}, {"Date": "2025-11-17", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 638255, "Cost ($)": 0.9899}, {"Date": "2025-11-18", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 105685515, "Cost ($)": 53.7985}, {"Date": "2025-11-19", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 42453788, "Cost ($)": 26.9524}, {"Date": "2025-11-19", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 742219, "Cost ($)": 0.4307}, {"Date": "2025-11-19", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 2749441, "Cost ($)": 2.0662}, {"Date": "2025-11-19", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 742219, "Cost ($)": 0.4307}, {"Date": "2025-11-20", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 4554824, "Cost ($)": 2.3443}, {"Date": "2025-11-20", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 32445325, "Cost ($)": 19.7011}, {"Date": "2025-11-20", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 4554824, "Cost ($)": 2.3443}, {"Date": "2025-11-21", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 264353, "Cost ($)": 0.29}, {"Date": "2025-11-21", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 25621364, "Cost ($)": 16.1335}, {"Date": "2025-11-21", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 264353, "Cost ($)": 0.29}, {"Date": "2025-11-24", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 24717634, "Cost ($)": 18.1827}, {"Date": "2025-11-24", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 36196467, "Cost ($)": 27.6919}, {"Date": "2025-11-24", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 36196467, "Cost ($)": 27.6919}, {"Date": "2025-11-25", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 42282470, "Cost ($)": 34.3793}, {"Date": "2025-11-25", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 134304301, "Cost ($)": 111.331}, {"Date": "2025-11-25", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 134304301, "Cost ($)": 111.331}, {"Date": "2025-11-26", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 5187171, "Cost ($)": 3.6879}, {"Date": "2025-11-26", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 61197206, "Cost ($)": 48.6508}, {"Date": "2025-11-26", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 61197206, "Cost ($)": 48.6508}, {"Date": "2025-11-27", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 53296925, "Cost ($)": 31.6186}, {"Date": "2025-11-27", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 10092380, "Cost ($)": 6.0643}, {"Date": "2025-11-27", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 53296925, "Cost ($)": 31.6186}, {"Date": "2025-11-28", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 75311927, "Cost ($)": 58.0312}, {"Date": "2025-11-28", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 5756303, "Cost ($)": 3.0058}, {"Date": "2025-11-28", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 75311927, "Cost ($)": 58.0312}, {"Date": "2025-11-29", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 40068985, "Cost ($)": 33.2959}, {"Date": "2025-11-29", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 30795369, "Cost ($)": 20.0591}, {"Date": "2025-11-29", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 40068985, "Cost ($)": 33.2959}, {"Date": "2025-11-30", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 45337137, "Cost ($)": 38.6239}, {"Date": "2025-12-01", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 528925, "Cost ($)": 0.3882}, {"Date": "2025-12-01", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 13396201, "Cost ($)": 13.7816}, {"Date": "2025-12-02", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 350913, "Cost ($)": 0.4065}, {"Date": "2025-12-02", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 55639860, "Cost ($)": 44.6179}, {"Date": "2025-12-02", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 350913, "Cost ($)": 0.4065}, {"Date": "2025-12-03", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 24994881, "Cost ($)": 16.6395}, {"Date": "2025-12-03", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 251054, "Cost ($)": 0.9143}, {"Date": "2025-12-03", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 41742778, "Cost ($)": 31.882}, {"Date": "2025-12-03", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 251054, "Cost ($)": 0.9143}, {"Date": "2025-12-04", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 6476688, "Cost ($)": 4.346}, {"Date": "2025-12-04", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 7383521, "Cost ($)": 5.8052}, {"Date": "2025-12-04", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 125222974, "Cost ($)": 109.8672}, {"Date": "2025-12-04", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 7383521, "Cost ($)": 5.8052}, {"Date": "2025-12-05", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 7476426, "Cost ($)": 4.8369}, {"Date": "2025-12-05", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 129389519, "Cost ($)": 89.7733}, {"Date": "2025-12-06", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 182790445, "Cost ($)": 131.8211}, {"Date": "2025-12-07", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 93108283, "Cost ($)": 61.4035}, {"Date": "2025-12-08", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 19992388, "Cost ($)": 10.4162}, {"Date": "2025-12-08", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 84554, "Cost ($)": 0.3492}, {"Date": "2025-12-08", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 28210903, "Cost ($)": 14.0331}, {"Date": "2025-12-08", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 84554, "Cost ($)": 0.3492}, {"Date": "2025-12-09", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 22094757, "Cost ($)": 9.633}, {"Date": "2025-12-09", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 10194888, "Cost ($)": 5.0492}, {"Date": "2025-12-10", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 30829943, "Cost ($)": 17.4359}, {"Date": "2025-12-10", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 326063, "Cost ($)": 0.5092}, {"Date": "2025-12-10", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 74361574, "Cost ($)": 47.8859}, {"Date": "2025-12-10", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 326063, "Cost ($)": 0.5092}, {"Date": "2025-12-11", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 14917453, "Cost ($)": 7.7026}, {"Date": "2025-12-11", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 12254463, "Cost ($)": 6.0858}, {"Date": "2025-12-11", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 127677963, "Cost ($)": 70.1549}, {"Date": "2025-12-11", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 12254463, "Cost ($)": 6.0858}, {"Date": "2025-12-12", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 1372873, "Cost ($)": 0.9457}, {"Date": "2025-12-12", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 7095255, "Cost ($)": 13.6256}, {"Date": "2025-12-12", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 32230252, "Cost ($)": 18.2633}, {"Date": "2025-12-12", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 7095255, "Cost ($)": 13.6256}, {"Date": "2025-12-13", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 13717170, "Cost ($)": 7.847}, {"Date": "2025-12-14", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 14513746, "Cost ($)": 8.8597}, {"Date": "2025-12-14", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 30932694, "Cost ($)": 18.303}, {"Date": "2025-12-14", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 14513746, "Cost ($)": 8.8597}, {"Date": "2025-12-15", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 4622790, "Cost ($)": 3.9456}, {"Date": "2025-12-15", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 427250, "Cost ($)": 0.2679}, {"Date": "2025-12-16", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 8802350, "Cost ($)": 4.5316}, {"Date": "2025-12-16", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 8802350, "Cost ($)": 4.5316}, {"Date": "2025-12-17", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 120920, "Cost ($)": 0.4511}, {"Date": "2025-12-17", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 120920, "Cost ($)": 0.4511}, {"Date": "2025-12-18", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 5019, "Cost ($)": 0.0105}, {"Date": "2025-12-18", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 223355, "Cost ($)": 0.2059}, {"Date": "2025-12-18", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 5019, "Cost ($)": 0.0105}, {"Date": "2025-12-19", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 7772265, "Cost ($)": 8.3701}, {"Date": "2025-12-19", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 7772265, "Cost ($)": 8.3701}, {"Date": "2025-12-20", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 2362, "Cost ($)": 0.0041}, {"Date": "2025-12-20", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 2362, "Cost ($)": 0.0041}, {"Date": "2025-12-21", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 20462565, "Cost ($)": 10.7813}, {"Date": "2025-12-21", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 1279177, "Cost ($)": 0.9364}, {"Date": "2025-12-21", "Machine": "Mac.lan-dbb5a60e", "Tokens": 1279177, "Cost ($)": 0.9364}, {"Date": "2025-12-22", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 197010264, "Cost ($)": 90.5628}, {"Date": "2025-12-22", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 197010264, "Cost ($)": 90.5628}, {"Date": "2025-12-23", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 18849663, "Cost ($)": 11.9101}, {"Date": "2025-12-23", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 18849663, "Cost ($)": 11.9101}, {"Date": "2025-12-24", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 114511667, "Cost ($)": 53.6574}, {"Date": "2025-12-24", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 13958534, "Cost ($)": 5.807}, {"Date": "2025-12-24", "Machine": "Mac.lan-dbb5a60e", "Tokens": 13958534, "Cost ($)": 5.807}, {"Date": "2025-12-29", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 142392344, "Cost ($)": 81.1058}, {"Date": "2025-12-29", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 61889596, "Cost ($)": 24.5056}, {"Date": "2025-12-29", "Machine": "Mac.lan-dbb5a60e", "Tokens": 61889596, "Cost ($)": 24.5056}, {"Date": "2025-12-30", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 37755362, "Cost ($)": 34.6855}, {"Date": "2025-12-30", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 6024660, "Cost ($)": 4.6158}, {"Date": "2025-12-30", "Machine": "Mac.lan-dbb5a60e", "Tokens": 6024660, "Cost ($)": 4.6158}, {"Date": "2025-12-31", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 54842226, "Cost ($)": 49.1267}, {"Date": "2025-12-31", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 686811, "Cost ($)": 0.505}, {"Date": "2025-12-31", "Machine": "Mac.lan-dbb5a60e", "Tokens": 686811, "Cost ($)": 0.505}, {"Date": "2026-01-06", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 15623705, "Cost ($)": 12.7269}, {"Date": "2026-01-07", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 46853881, "Cost ($)": 42.3768}, {"Date": "2026-01-07", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 218204, "Cost ($)": 0.2684}, {"Date": "2026-01-07", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 46853881, "Cost ($)": 42.3768}, {"Date": "2026-01-07", "Machine": "Mac.lan-dbb5a60e", "Tokens": 46853881, "Cost ($)": 42.3768}, {"Date": "2026-01-08", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 28710781, "Cost ($)": 20.93}, {"Date": "2026-01-08", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 15147574, "Cost ($)": 12.8672}, {"Date": "2026-01-08", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 59190150, "Cost ($)": 39.9737}, {"Date": "2026-01-08", "Machine": "Mac.lan-dbb5a60e", "Tokens": 59190150, "Cost ($)": 39.9737}, {"Date": "2026-01-09", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 144213601, "Cost ($)": 82.4847}, {"Date": "2026-01-09", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 84565, "Cost ($)": 0.1118}, {"Date": "2026-01-09", "Machine": "Mac.lan-dbb5a60e", "Tokens": 144213601, "Cost ($)": 82.4847}, {"Date": "2026-01-10", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 55442609, "Cost ($)": 37.7547}, {"Date": "2026-01-10", "Machine": "Mac.lan-dbb5a60e", "Tokens": 55442609, "Cost ($)": 37.7547}, {"Date": "2026-01-11", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 97652340, "Cost ($)": 70.3962}, {"Date": "2026-01-11", "Machine": "Mac.lan-dbb5a60e", "Tokens": 97652340, "Cost ($)": 70.3962}, {"Date": "2026-01-12", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 14226394, "Cost ($)": 9.202}, {"Date": "2026-01-12", "Machine": "Mac.lan-dbb5a60e", "Tokens": 14226394, "Cost ($)": 9.202}, {"Date": "2026-01-13", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 110009010, "Cost ($)": 76.7792}, {"Date": "2026-01-13", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 36306, "Cost ($)": 0.1131}, {"Date": "2026-01-13", "Machine": "Mac.lan-dbb5a60e", "Tokens": 110009010, "Cost ($)": 76.7792}, {"Date": "2026-01-14", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 56273136, "Cost ($)": 47.211}, {"Date": "2026-01-14", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 915022, "Cost ($)": 0.1748}, {"Date": "2026-01-14", "Machine": "Mac.lan-dbb5a60e", "Tokens": 56273136, "Cost ($)": 47.211}, {"Date": "2026-01-15", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 41862215, "Cost ($)": 29.2383}, {"Date": "2026-01-15", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 1847812, "Cost ($)": 0.2638}, {"Date": "2026-01-15", "Machine": "Mac.lan-dbb5a60e", "Tokens": 41862215, "Cost ($)": 29.2383}, {"Date": "2026-01-16", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 87292599, "Cost ($)": 59.2666}, {"Date": "2026-01-16", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 1441698, "Cost ($)": 1.234}, {"Date": "2026-01-16", "Machine": "Mac.lan-dbb5a60e", "Tokens": 87292599, "Cost ($)": 59.2666}, {"Date": "2026-01-17", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 159167322, "Cost ($)": 101.2574}, {"Date": "2026-01-17", "Machine": "Mac.lan-dbb5a60e", "Tokens": 159167322, "Cost ($)": 101.2574}, {"Date": "2026-01-18", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 127521071, "Cost ($)": 127.0137}, {"Date": "2026-01-18", "Machine": "Mac.lan-dbb5a60e", "Tokens": 127521071, "Cost ($)": 127.0137}, {"Date": "2026-01-19", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 108562877, "Cost ($)": 79.7098}, {"Date": "2026-01-19", "Machine": "Mac.lan-dbb5a60e", "Tokens": 108562877, "Cost ($)": 79.7098}, {"Date": "2026-01-20", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 65801459, "Cost ($)": 46.3788}, {"Date": "2026-01-20", "Machine": "Mac.lan-dbb5a60e", "Tokens": 65801459, "Cost ($)": 46.3788}, {"Date": "2026-01-20", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 3020717, "Cost ($)": 1.1363}, {"Date": "2026-01-21", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 6261036, "Cost ($)": 5.3524}, {"Date": "2026-01-21", "Machine": "Mac.lan-dbb5a60e", "Tokens": 6261036, "Cost ($)": 5.3524}, {"Date": "2026-01-21", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 2232464, "Cost ($)": 0.4173}, {"Date": "2026-01-22", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 135757209, "Cost ($)": 88.5362}, {"Date": "2026-01-22", "Machine": "Mac.lan-dbb5a60e", "Tokens": 135757209, "Cost ($)": 88.5362}, {"Date": "2026-01-22", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 749164, "Cost ($)": 0.1607}, {"Date": "2026-01-23", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 222792084, "Cost ($)": 150.0449}, {"Date": "2026-01-23", "Machine": "Mac.lan-dbb5a60e", "Tokens": 222792084, "Cost ($)": 150.0449}, {"Date": "2026-01-24", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 31192250, "Cost ($)": 22.4014}, {"Date": "2026-01-24", "Machine": "Mac.lan-dbb5a60e", "Tokens": 31192250, "Cost ($)": 22.4014}, {"Date": "2026-01-25", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 7790210, "Cost ($)": 6.0318}, {"Date": "2026-01-25", "Machine": "Mac.lan-dbb5a60e", "Tokens": 7790210, "Cost ($)": 6.0318}, {"Date": "2026-01-26", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 17492201, "Cost ($)": 11.9031}, {"Date": "2026-01-26", "Machine": "Mac.lan-dbb5a60e", "Tokens": 17492201, "Cost ($)": 11.9031}, {"Date": "2026-01-26", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 453209, "Cost ($)": 0.1062}, {"Date": "2026-01-27", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 191061123, "Cost ($)": 110.4233}, {"Date": "2026-01-27", "Machine": "Mac.lan-dbb5a60e", "Tokens": 191061123, "Cost ($)": 110.4233}, {"Date": "2026-01-27", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 3163742, "Cost ($)": 1.1109}, {"Date": "2026-01-28", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 12986670, "Cost ($)": 10.1475}, {"Date": "2026-01-28", "Machine": "Mac.lan-dbb5a60e", "Tokens": 12986670, "Cost ($)": 10.1475}, {"Date": "2026-01-28", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 1077371, "Cost ($)": 0.5807}, {"Date": "2026-01-29", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 156469650, "Cost ($)": 93.7179}, {"Date": "2026-01-29", "Machine": "Mac.lan-dbb5a60e", "Tokens": 156469650, "Cost ($)": 93.7179}, {"Date": "2026-01-29", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 941497, "Cost ($)": 0.6947}, {"Date": "2026-01-30", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 91591908, "Cost ($)": 58.313}, {"Date": "2026-01-30", "Machine": "Mac.lan-dbb5a60e", "Tokens": 91591908, "Cost ($)": 58.313}, {"Date": "2026-01-30", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 5063541, "Cost ($)": 2.6804}, {"Date": "2026-01-31", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 107302287, "Cost ($)": 68.0213}, {"Date": "2026-01-31", "Machine": "Mac.lan-dbb5a60e", "Tokens": 107302287, "Cost ($)": 68.0213}, {"Date": "2026-02-01", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 11275524, "Cost ($)": 8.2712}, {"Date": "2026-02-01", "Machine": "Mac.lan-dbb5a60e", "Tokens": 11275524, "Cost ($)": 8.2712}, {"Date": "2026-02-02", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 167554249, "Cost ($)": 137.6418}, {"Date": "2026-02-02", "Machine": "Mac.lan-dbb5a60e", "Tokens": 167554249, "Cost ($)": 137.6418}, {"Date": "2026-02-02", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 4310795, "Cost ($)": 2.7886}, {"Date": "2026-02-03", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 74399333, "Cost ($)": 77.7705}, {"Date": "2026-02-03", "Machine": "Mac.lan-dbb5a60e", "Tokens": 74399333, "Cost ($)": 77.7705}, {"Date": "2026-02-03", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 75111, "Cost ($)": 0.1229}, {"Date": "2026-02-03", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 75111, "Cost ($)": 0.1229}, {"Date": "2026-02-04", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 4176546, "Cost ($)": 4.8267}, {"Date": "2026-02-04", "Machine": "Mac.lan-dbb5a60e", "Tokens": 4176546, "Cost ($)": 4.8267}, {"Date": "2026-02-05", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 175750093, "Cost ($)": 99.8645}, {"Date": "2026-02-05", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 1339409, "Cost ($)": 0.4279}, {"Date": "2026-02-05", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 3433187, "Cost ($)": 2.0279}, {"Date": "2026-02-06", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 89412827, "Cost ($)": 58.3184}, {"Date": "2026-02-06", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 1730699, "Cost ($)": 1.7219}, {"Date": "2026-02-06", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 10967620, "Cost ($)": 7.9648}, {"Date": "2026-02-07", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 119474424, "Cost ($)": 76.5622}, {"Date": "2026-02-07", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 8467699, "Cost ($)": 5.6624}, {"Date": "2026-02-08", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 141282945, "Cost ($)": 95.1184}, {"Date": "2026-02-08", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 15649426, "Cost ($)": 10.6327}, {"Date": "2026-02-09", "Machine": "Mac.lan-dbb5a60e", "Tokens": 52903901, "Cost ($)": 41.7193}, {"Date": "2026-02-09", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 278509973, "Cost ($)": 192.772}, {"Date": "2026-02-09", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 141222741, "Cost ($)": 91.7015}, {"Date": "2026-02-10", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 205485410, "Cost ($)": 128.1477}, {"Date": "2026-02-10", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 24399351, "Cost ($)": 11.119}, {"Date": "2026-02-11", "Machine": "Mac.lan-dbb5a60e", "Tokens": 7973973, "Cost ($)": 5.1018}, {"Date": "2026-02-11", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 129097351, "Cost ($)": 82.4794}, {"Date": "2026-02-11", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 997440, "Cost ($)": 0.1623}, {"Date": "2026-02-11", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 21477360, "Cost ($)": 12.3767}, {"Date": "2026-02-12", "Machine": "Mac.lan-dbb5a60e", "Tokens": 607455, "Cost ($)": 0.4386}, {"Date": "2026-02-12", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 92791236, "Cost ($)": 61.2212}, {"Date": "2026-02-12", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 4994368, "Cost ($)": 2.4648}, {"Date": "2026-02-12", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 19518241, "Cost ($)": 14.229}, {"Date": "2026-02-13", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 44477831, "Cost ($)": 26.2406}, {"Date": "2026-02-13", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 18810081, "Cost ($)": 15.0921}, {"Date": "2026-02-14", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 146818569, "Cost ($)": 99.5053}, {"Date": "2026-02-15", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 778004, "Cost ($)": 1.0861}, {"Date": "2026-02-16", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 5702830, "Cost ($)": 4.3753}, {"Date": "2026-02-17", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 4990024, "Cost ($)": 4.0485}, {"Date": "2026-02-18", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 5148631, "Cost ($)": 6.7944}, {"Date": "2026-02-19", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 320134778, "Cost ($)": 275.9561}, {"Date": "2026-02-19", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 2637058, "Cost ($)": 3.998}, {"Date": "2026-02-20", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 363424603, "Cost ($)": 253.9949}, {"Date": "2026-02-20", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 3235860, "Cost ($)": 2.38}, {"Date": "2026-02-21", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 385168542, "Cost ($)": 251.1209}, {"Date": "2026-02-22", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 303861002, "Cost ($)": 192.361}, {"Date": "2026-02-23", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 507372539, "Cost ($)": 275.6536}, {"Date": "2026-02-23", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 2308354, "Cost ($)": 1.8776}, {"Date": "2026-02-24", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 521534498, "Cost ($)": 307.5905}, {"Date": "2026-02-25", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 244237128, "Cost ($)": 178.0651}, {"Date": "2026-02-25", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 4307138, "Cost ($)": 4.1448}, {"Date": "2026-02-26", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 215163169, "Cost ($)": 147.184}, {"Date": "2026-02-27", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 432850555, "Cost ($)": 267.1755}, {"Date": "2026-02-27", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 260226, "Cost ($)": 0.1215}, {"Date": "2026-02-28", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 365235184, "Cost ($)": 225.5523}, {"Date": "2026-03-01", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 352423151, "Cost ($)": 215.5467}, {"Date": "2026-03-02", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 452317726, "Cost ($)": 272.4974}, {"Date": "2026-03-02", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 57967225, "Cost ($)": 36.3321}, {"Date": "2026-03-03", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 182612831, "Cost ($)": 114.1696}, {"Date": "2026-03-03", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 6212393, "Cost ($)": 4.5303}, {"Date": "2026-03-04", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 24062714, "Cost ($)": 16.4775}, {"Date": "2026-03-04", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 78344193, "Cost ($)": 27.7641}, {"Date": "2026-03-05", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 258592616, "Cost ($)": 164.7673}, {"Date": "2026-03-05", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 1280372, "Cost ($)": 1.4029}, {"Date": "2026-03-06", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 117225840, "Cost ($)": 72.6116}, {"Date": "2026-03-07", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 229961706, "Cost ($)": 147.1799}, {"Date": "2026-03-08", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 149672659, "Cost ($)": 92.6157}, {"Date": "2026-03-09", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 172481053, "Cost ($)": 105.72}, {"Date": "2026-03-09", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 190447, "Cost ($)": 0.2626}, {"Date": "2026-03-10", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 248660819, "Cost ($)": 161.5157}, {"Date": "2026-03-10", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 59656, "Cost ($)": 0.1223}, {"Date": "2026-03-11", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 142960439, "Cost ($)": 83.4712}, {"Date": "2026-03-11", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 4043016, "Cost ($)": 1.8671}, {"Date": "2026-03-12", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 290300157, "Cost ($)": 185.5871}, {"Date": "2026-03-13", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 62870675, "Cost ($)": 37.3393}, {"Date": "2026-03-13", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 39049740, "Cost ($)": 21.9179}, {"Date": "2026-03-14", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 186347353, "Cost ($)": 123.5889}, {"Date": "2026-03-15", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 482385077, "Cost ($)": 315.5251}, {"Date": "2026-03-16", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 3191943, "Cost ($)": 2.2487}, {"Date": "2026-03-16", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 93030274, "Cost ($)": 67.8781}, {"Date": "2026-03-17", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 382332777, "Cost ($)": 286.2804}, {"Date": "2026-03-17", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 82900501, "Cost ($)": 71.064}, {"Date": "2026-03-18", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 280689768, "Cost ($)": 167.9959}, {"Date": "2026-03-18", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 37416303, "Cost ($)": 34.7316}, {"Date": "2026-03-19", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 226524840, "Cost ($)": 157.9754}, {"Date": "2026-03-19", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 430527037, "Cost ($)": 328.3051}, {"Date": "2026-03-20", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 33699943, "Cost ($)": 23.0815}, {"Date": "2026-03-20", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 31202108, "Cost ($)": 24.2338}, {"Date": "TOTALS", "Machine": null, "Tokens": 19015433994, "Cost ($)": 12713.981}], "Weekly": [{"Date": "2025-11-10", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 550358, "Cost ($)": 1.3688}, {"Date": "2025-11-10", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 1908261, "Cost ($)": 1.1572}, {"Date": "2025-11-10", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 71591259, "Cost ($)": 49.7715}, {"Date": "2025-11-17", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 74476318, "Cost ($)": 50.2498}, {"Date": "2025-11-17", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 5561396, "Cost ($)": 3.065}, {"Date": "2025-11-17", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 60816130, "Cost ($)": 37.9008}, {"Date": "2025-11-17", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 5561396, "Cost ($)": 3.065}, {"Date": "2025-11-24", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 72187275, "Cost ($)": 56.2499}, {"Date": "2025-11-24", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 400375811, "Cost ($)": 310.6194}, {"Date": "2025-11-24", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 91981189, "Cost ($)": 67.7532}, {"Date": "2025-11-24", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 400375811, "Cost ($)": 310.6194}, {"Date": "2025-12-01", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 39476920, "Cost ($)": 26.2106}, {"Date": "2025-12-01", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 7985488, "Cost ($)": 7.126}, {"Date": "2025-12-01", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 641290060, "Cost ($)": 483.1466}, {"Date": "2025-12-01", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 7985488, "Cost ($)": 7.126}, {"Date": "2025-12-08", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 69215026, "Cost ($)": 35.7172}, {"Date": "2025-12-08", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 34274081, "Cost ($)": 29.4295}, {"Date": "2025-12-08", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 317325444, "Cost ($)": 181.5364}, {"Date": "2025-12-08", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 34274081, "Cost ($)": 29.4295}, {"Date": "2025-12-15", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 223355, "Cost ($)": 0.2059}, {"Date": "2025-12-15", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 427250, "Cost ($)": 0.2679}, {"Date": "2025-12-15", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 37165481, "Cost ($)": 24.1487}, {"Date": "2025-12-15", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 1279177, "Cost ($)": 0.9364}, {"Date": "2025-12-15", "Machine": "Mac.lan-dbb5a60e", "Tokens": 1279177, "Cost ($)": 0.9364}, {"Date": "2025-12-22", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 330371594, "Cost ($)": 156.1303}, {"Date": "2025-12-22", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 13958534, "Cost ($)": 5.807}, {"Date": "2025-12-22", "Machine": "Mac.lan-dbb5a60e", "Tokens": 13958534, "Cost ($)": 5.807}, {"Date": "2025-12-29", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 234989932, "Cost ($)": 164.9179}, {"Date": "2025-12-29", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 68601067, "Cost ($)": 29.6264}, {"Date": "2025-12-29", "Machine": "Mac.lan-dbb5a60e", "Tokens": 68601067, "Cost ($)": 29.6264}, {"Date": "2026-01-05", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 75564662, "Cost ($)": 63.3068}, {"Date": "2026-01-05", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 84565, "Cost ($)": 0.1118}, {"Date": "2026-01-05", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 403352581, "Cost ($)": 272.9861}, {"Date": "2026-01-05", "Machine": "Mac.lan-dbb5a60e", "Tokens": 403352581, "Cost ($)": 272.9861}, {"Date": "2026-01-12", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 596351747, "Cost ($)": 449.9681}, {"Date": "2026-01-12", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 4240838, "Cost ($)": 1.7856}, {"Date": "2026-01-12", "Machine": "Mac.lan-dbb5a60e", "Tokens": 596351747, "Cost ($)": 449.9681}, {"Date": "2026-01-19", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 578157125, "Cost ($)": 398.4552}, {"Date": "2026-01-19", "Machine": "Mac.lan-dbb5a60e", "Tokens": 578157125, "Cost ($)": 398.4552}, {"Date": "2026-01-19", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 6002345, "Cost ($)": 1.7143}, {"Date": "2026-01-26", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 588179363, "Cost ($)": 360.7973}, {"Date": "2026-01-26", "Machine": "Mac.lan-dbb5a60e", "Tokens": 588179363, "Cost ($)": 360.7973}, {"Date": "2026-01-26", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 9757863, "Cost ($)": 4.4783}, {"Date": "2026-02-02", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 246130128, "Cost ($)": 220.239}, {"Date": "2026-02-02", "Machine": "Mac.lan-dbb5a60e", "Tokens": 246130128, "Cost ($)": 220.239}, {"Date": "2026-02-02", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 525995400, "Cost ($)": 329.9864}, {"Date": "2026-02-02", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 5650204, "Cost ($)": 3.2165}, {"Date": "2026-02-02", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 38517932, "Cost ($)": 26.2878}, {"Date": "2026-02-09", "Machine": "Mac.lan-dbb5a60e", "Tokens": 61485329, "Cost ($)": 47.2597}, {"Date": "2026-02-09", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 705883970, "Cost ($)": 464.6202}, {"Date": "2026-02-09", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 24801889, "Cost ($)": 17.7193}, {"Date": "2026-02-09", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 397914093, "Cost ($)": 255.1722}, {"Date": "2026-02-16", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 1388430410, "Cost ($)": 988.6512}, {"Date": "2026-02-16", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 5872918, "Cost ($)": 6.3779}, {"Date": "2026-02-23", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 2638816224, "Cost ($)": 1616.7675}, {"Date": "2026-02-23", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 6875718, "Cost ($)": 6.1439}, {"Date": "2026-03-02", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 1414446092, "Cost ($)": 880.3189}, {"Date": "2026-03-02", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 143804183, "Cost ($)": 70.0294}, {"Date": "2026-03-09", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 1586005573, "Cost ($)": 1012.7472}, {"Date": "2026-03-09", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 43342859, "Cost ($)": 24.1699}, {"Date": "2026-03-16", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 926474419, "Cost ($)": 637.6093}, {"Date": "2026-03-16", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 675076223, "Cost ($)": 526.2125}, {"Date": "TOTALS", "Machine": null, "Tokens": 18617452557, "Cost ($)": 12499.5301}], "Monthly": [{"Date": "2025-11", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 147213951, "API Cost ($)": 107.8685, "Subscription ($)": 50, "Savings ($)": 57.8685}, {"Date": "2025-11", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 405937207, "API Cost ($)": 313.6844, "Subscription ($)": 50, "Savings ($)": 263.6844}, {"Date": "2025-11", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 224388578, "API Cost ($)": 155.4255, "Subscription ($)": 50, "Savings ($)": 105.4255}, {"Date": "2025-11", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 405937207, "API Cost ($)": 313.6844, "Subscription ($)": 50, "Savings ($)": 263.6844}, {"Date": "2025-12", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 223355, "API Cost ($)": 0.2059, "Subscription ($)": 40, "Savings ($)": -39.7941}, {"Date": "2025-12", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 644786576, "API Cost ($)": 381.7523, "Subscription ($)": 40, "Savings ($)": 341.7523}, {"Date": "2025-12", "Machine": "Tylers-PC-a0bfcb54", "Tokens": 959042754, "API Cost ($)": 664.9509, "Subscription ($)": 40, "Savings ($)": 624.9509}, {"Date": "2025-12", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 83838778, "API Cost ($)": 36.3697, "Subscription ($)": 40, "Savings ($)": -3.6303}, {"Date": "2025-12", "Machine": "Mac.lan-dbb5a60e", "Tokens": 83838778, "API Cost ($)": 36.3697, "Subscription ($)": 40, "Savings ($)": -3.6303}, {"Date": "2026-01", "Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 75637579, "API Cost ($)": 63.3461, "Subscription ($)": 50, "Savings ($)": 13.3461}, {"Date": "2026-01", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 20085611, "API Cost ($)": 8.09, "Subscription ($)": 50, "Savings ($)": -41.91}, {"Date": "2026-01", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 2154765292, "API Cost ($)": 1473.9355, "Subscription ($)": 50, "Savings ($)": 1423.9355}, {"Date": "2026-01", "Machine": "Mac.lan-dbb5a60e", "Tokens": 2154765292, "API Cost ($)": 1473.9355, "Subscription ($)": 50, "Savings ($)": 1423.9355}, {"Date": "2026-02", "Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 257405652, "API Cost ($)": 228.5103, "Subscription ($)": 40, "Savings ($)": 188.5103}, {"Date": "2026-02", "Machine": "Mac.lan-dbb5a60e", "Tokens": 318890981, "API Cost ($)": 275.77, "Subscription ($)": 40, "Savings ($)": 235.77}, {"Date": "2026-02", "Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 1231879370, "API Cost ($)": 794.6066, "Subscription ($)": 40, "Savings ($)": 754.6066}, {"Date": "2026-02", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 43200729, "API Cost ($)": 33.4576, "Subscription ($)": 40, "Savings ($)": -6.5424}, {"Date": "2026-02", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 4111255508, "API Cost ($)": 2671.332, "Subscription ($)": 40, "Savings ($)": 2631.332}, {"Date": "2026-03", "Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 4279393349, "API Cost ($)": 2746.2964, "Subscription ($)": 100, "Savings ($)": 2646.2964}, {"Date": "2026-03", "Machine": "RISKAZ-66573709-163a2507", "Tokens": 862223265, "API Cost ($)": 620.4119, "Subscription ($)": 100, "Savings ($)": 520.4119}, {"Date": "TOTALS", "Machine": null, "Tokens": 18464709812, "API Cost ($)": 12400.0031, "Subscription ($)": 1000, "Savings ($)": 11400.0031}], "Machine Totals": [{"Machine": "Mac.lan-dbb5a60e", "Tokens": 2557495051, "Cost ($)": 1786.0752}, {"Machine": "RISKAZ-66573709-163a2507", "Tokens": 1239915714, "Cost ($)": 874.6024}, {"Machine": "Tylers-PC-a0bfcb54", "Tokens": 1183431332, "Cost ($)": 820.3763}, {"Machine": "tylers-Mac-mini-10.lan-09ef2ada", "Tokens": 1231879370, "Cost ($)": 794.6066}, {"Machine": "tylers-Mac-mini.lan-033751f7", "Tokens": 8391422710, "Cost ($)": 5418.7357}, {"Machine": "tylers-MacBook-Air.local-ab71ee47", "Tokens": 1234520476, "Cost ($)": 814.6891}, {"Machine": "tylers-MacBook-Air.local-c4e297c3", "Tokens": 3176769341, "Cost ($)": 2204.8956}, {"Machine": "TOTALS", "Tokens": 19015433994, "Cost ($)": 12713.981}]};
+var SUB_COST = 200;
+
+var MACHINE_COLORS = {
+  'Mac.lan-dbb5a60e': '#00cec9',
+  'RISKAZ-66573709-163a2507': '#e17055',
+  'Tylers-PC-a0bfcb54': '#0984e3',
+  'tylers-Mac-mini-10.lan-09ef2ada': '#fdcb6e',
+  'tylers-Mac-mini.lan-033751f7': '#6c5ce7',
+  'tylers-MacBook-Air.local-ab71ee47': '#00b894',
+  'tylers-MacBook-Air.local-c4e297c3': '#fd79a8'
+};
+var MACHINE_LABELS = {
+  'Mac.lan-dbb5a60e': 'Mac.lan',
+  'RISKAZ-66573709-163a2507': 'RISKAZ (Work)',
+  'Tylers-PC-a0bfcb54': 'Tylers PC',
+  'tylers-Mac-mini-10.lan-09ef2ada': 'Mac Mini 10',
+  'tylers-Mac-mini.lan-033751f7': 'Mac Mini',
+  'tylers-MacBook-Air.local-ab71ee47': 'MacBook Air (ab71)',
+  'tylers-MacBook-Air.local-c4e297c3': 'MacBook Air (c4e2)'
+};
+
+function ml(m) { return MACHINE_LABELS[m] || m; }
+function mc(m) { return MACHINE_COLORS[m] || '#999'; }
+function fmt$(v) { return '$' + v.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+function fmtT(v) {
+  if (v >= 1e9) return (v/1e9).toFixed(2) + 'B';
+  if (v >= 1e6) return (v/1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return (v/1e3).toFixed(0) + 'K';
+  return v.toString();
+}
+
+// The monthly sheet now uses "API Cost ($)" as the cost column key
+var costKey = DATA['Monthly'][0] && DATA['Monthly'][0]['API Cost ($)'] !== undefined ? 'API Cost ($)' : 'Cost ($)';
+
+// Aggregate monthly data
+var machineTotals = DATA['Machine Totals'].filter(function(r) { return r.Machine !== 'TOTALS'; });
+var totalsRow = DATA['Machine Totals'].find(function(r) { return r.Machine === 'TOTALS'; });
+var totalCost = totalsRow ? totalsRow['Cost ($)'] : machineTotals.reduce(function(s, r) { return s + r['Cost ($)']; }, 0);
+var totalTokens = totalsRow ? totalsRow['Tokens'] : machineTotals.reduce(function(s, r) { return s + r['Tokens']; }, 0);
+
+var monthlyRows = DATA['Monthly'].filter(function(r) { return r.Date !== 'TOTALS'; });
+var monthlyAgg = {};
+monthlyRows.forEach(function(r) {
+  if (!monthlyAgg[r.Date]) monthlyAgg[r.Date] = { api: 0, sub: 0, savings: 0 };
+  monthlyAgg[r.Date].api += r[costKey] || 0;
+  monthlyAgg[r.Date].sub = SUB_COST; // flat $200 per month
+  monthlyAgg[r.Date].savings = monthlyAgg[r.Date].api - SUB_COST;
+});
+var months = Object.keys(monthlyAgg).sort();
+var currentMonth = months[months.length - 1];
+var prevMonth = months.length > 1 ? months[months.length - 2] : null;
+var totalSubCost = months.length * SUB_COST;
+var totalSavings = totalCost - totalSubCost;
+
+var dailyDates = [];
+var dailySeen = {};
+DATA['Daily'].filter(function(r) { return r.Date !== 'TOTALS'; }).forEach(function(r) {
+  if (!dailySeen[r.Date]) { dailySeen[r.Date] = true; dailyDates.push(r.Date); }
+});
+var numDays = dailyDates.length;
+var avgDaily = totalCost / numDays;
+
+// KPIs
+document.getElementById('kpis').innerHTML =
+  '<div class="kpi"><div class="kpi-label">API Cost (if no sub)</div><div class="kpi-value">' + fmt$(totalCost) + '</div><div class="kpi-sub">' + fmtT(totalTokens) + ' tokens total</div></div>' +
+  '<div class="kpi"><div class="kpi-label">Subscription Cost</div><div class="kpi-value">' + fmt$(totalSubCost) + '</div><div class="kpi-sub">' + months.length + ' months \u00d7 $' + SUB_COST + '/mo</div></div>' +
+  '<div class="kpi"><div class="kpi-label">Total Saved</div><div class="kpi-value green">' + fmt$(totalSavings) + '</div><div class="kpi-sub">' + ((totalSavings / totalCost) * 100).toFixed(0) + '% savings vs API pricing</div></div>' +
+  '<div class="kpi"><div class="kpi-label">Current Month (' + currentMonth + ')</div><div class="kpi-value">' + fmt$(monthlyAgg[currentMonth].api) + '</div><div class="kpi-sub">API cost \u2014 saving ' + fmt$(monthlyAgg[currentMonth].savings) + '</div></div>' +
+  '<div class="kpi"><div class="kpi-label">Avg Daily (API)</div><div class="kpi-value">' + fmt$(avgDaily) + '</div><div class="kpi-sub">over ' + numDays + ' days</div></div>';
+
+// Cost Over Time (stacked bar by machine)
+var costChart;
+function buildCostChart(view) {
+  var canvas = document.getElementById('costChart');
+  if (costChart) costChart.destroy();
+  var sheetMap = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' };
+  var sheetCostKey = view === 'monthly' ? costKey : 'Cost ($)';
+  var rows = DATA[sheetMap[view]].filter(function(r) { return r.Date !== 'TOTALS'; });
+  var dateMap = {};
+  rows.forEach(function(r) {
+    if (!dateMap[r.Date]) dateMap[r.Date] = 0;
+    dateMap[r.Date] += r[sheetCostKey] || 0;
+  });
+  var dates = Object.keys(dateMap).sort();
+  var machines = [];
+  var seen = {};
+  rows.forEach(function(r) { if (!seen[r.Machine]) { seen[r.Machine] = true; machines.push(r.Machine); } });
+  var datasets = machines.map(function(m) {
+    return {
+      label: ml(m),
+      data: dates.map(function(d) {
+        var row = rows.find(function(r) { return r.Date === d && r.Machine === m; });
+        return row ? (row[sheetCostKey] || 0) : 0;
+      }),
+      backgroundColor: mc(m) + 'cc',
+      borderColor: mc(m),
+      borderWidth: 1,
+      borderRadius: 2
+    };
+  });
+  costChart = new Chart(canvas, {
+    type: 'bar',
+    data: { labels: dates, datasets: datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'top', labels: { color: '#8b8fa3', boxWidth: 12, padding: 12, font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label: function(ctx) { return ctx.dataset.label + ': ' + fmt$(ctx.raw); },
+            footer: function(items) { return 'Total: ' + fmt$(items.reduce(function(s,i) { return s + i.raw; }, 0)); }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#8b8fa3', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#2a2d3a' } },
+        y: { stacked: true, ticks: { color: '#8b8fa3', callback: function(v) { return '$' + v; } }, grid: { color: '#2a2d3a' } }
+      }
+    }
+  });
+}
+function switchCostView(view) {
+  document.querySelectorAll('.tab').forEach(function(t) { t.classList.toggle('active', t.dataset.view === view); });
+  buildCostChart(view);
+}
+buildCostChart('daily');
+
+// Machine Doughnut
+var sortedMachines = machineTotals.slice().sort(function(a,b) { return b['Cost ($)'] - a['Cost ($)']; });
+new Chart(document.getElementById('machineChart'), {
+  type: 'doughnut',
+  data: {
+    labels: sortedMachines.map(function(r) { return ml(r.Machine); }),
+    datasets: [{ data: sortedMachines.map(function(r) { return r['Cost ($)']; }), backgroundColor: sortedMachines.map(function(r) { return mc(r.Machine); }), borderWidth: 0, hoverOffset: 8 }]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false, cutout: '60%',
+    plugins: {
+      legend: { position: 'right', labels: { color: '#8b8fa3', padding: 8, font: { size: 11 }, boxWidth: 12 } },
+      tooltip: { callbacks: { label: function(ctx) { return ctx.label + ': ' + fmt$(ctx.raw); } } }
+    }
+  }
+});
+
+// Monthly Savings Chart: API cost bars vs $200 subscription line
+new Chart(document.getElementById('savingsChart'), {
+  type: 'bar',
+  data: {
+    labels: months,
+    datasets: [
+      {
+        label: 'API Cost (equivalent)',
+        data: months.map(function(m) { return monthlyAgg[m].api; }),
+        backgroundColor: '#6c5ce7cc',
+        borderColor: '#6c5ce7',
+        borderWidth: 1,
+        borderRadius: 4
+      },
+      {
+        label: '$200/mo Subscription',
+        data: months.map(function() { return SUB_COST; }),
+        borderColor: '#00b894',
+        borderWidth: 3,
+        borderDash: [6, 4],
+        type: 'line',
+        fill: false,
+        pointRadius: 0,
+        tension: 0,
+        order: 0
+      }
+    ]
+  },
+  options: {
+    responsive: true, maintainAspectRatio: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { position: 'top', labels: { color: '#8b8fa3', boxWidth: 12, padding: 12, font: { size: 11 } } },
+      tooltip: {
+        callbacks: {
+          afterBody: function(items) {
+            var apiItem = items.find(function(i) { return i.dataset.label === 'API Cost (equivalent)'; });
+            if (apiItem) {
+              var saved = apiItem.raw - SUB_COST;
+              return saved > 0
+                ? '\n\u2705 Saving ' + fmt$(saved) + ' this month'
+                : '\n\u26a0\ufe0f Sub costs ' + fmt$(Math.abs(saved)) + ' more than API';
+            }
+          }
+        }
+      }
+    },
+    scales: {
+      x: { ticks: { color: '#8b8fa3' }, grid: { color: '#2a2d3a' } },
+      y: { ticks: { color: '#8b8fa3', callback: function(v) { return '$' + v; } }, grid: { color: '#2a2d3a' } }
+    }
+  }
+});
+
+// Machine Table
+var maxCost = sortedMachines[0]['Cost ($)'];
+document.querySelector('#machineTable tbody').innerHTML = sortedMachines.map(function(r) {
+  var pct = (r['Cost ($)'] / totalCost * 100).toFixed(1);
+  var barPct = (r['Cost ($)'] / maxCost * 100).toFixed(0);
+  return '<tr><td title="' + r.Machine + '">' + ml(r.Machine) + '</td><td>' + fmtT(r.Tokens) + '</td><td>' + fmt$(r['Cost ($)']) + '</td><td><div class="bar-cell"><div class="bar-bg"><div class="bar-fill" style="width:' + barPct + '%;background:' + mc(r.Machine) + '"></div></div><span style="color:var(--muted);font-size:0.75rem;min-width:36px">' + pct + '%</span></div></td></tr>';
+}).join('');
+</script>
+</body>
+</html>
