@@ -1,287 +1,67 @@
 # AI Usage Budget Tracker
 
-A Python script to track Claude AI usage across **both** Windows and macOS. Automatically fetches total usage data from `bunx ccusage` and maintains an Excel file with overall daily, weekly, and monthly totals - tracked separately per OS and combined.
+A Python script that tracks Claude usage across several machines. It pulls per-period usage
+from [`ccusage`](https://github.com/ryoppippi/ccusage) and keeps one Excel workbook, shared
+through Git, with daily, weekly and monthly token and cost totals per machine, plus a
+comparison of API-equivalent cost against a $200/month subscription.
 
-## Features
+## Quick start
 
-- Cross-platform support (Windows & macOS)
-- Single Excel file shared via GitHub
-- Three sheets: Daily, Weekly, Monthly
-- **Separate tracking** for Windows and macOS
-- **Automatic combined totals** (Windows + macOS)
-- Simple, clean output with just the numbers you need
-- Updates automatically each time you run it
-
-## Prerequisites
-
-- Python 3.7 or higher
-- `bunx` installed and configured
-- Access to `bunx ccusage` command
-
-## Installation
-
-1. Clone this repository or download the files
-
-2. Install Python dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-## Usage
-
-### Running the Script
-
-Simply run:
 ```bash
+pip install -r requirements.txt
 python track_usage.py
 ```
 
-The script will:
-1. Fetch overall totals from `bunx ccusage daily/weekly/monthly`
-2. Update the current OS row in the Excel file
-3. Recalculate the combined totals (Windows + macOS)
-4. Display a summary
+Requires Python 3.7+ and `bunx` with access to `bunx ccusage`.
 
-### Example Output
+## How it works
 
-```
-============================================================
-AI Usage Budget Tracker
-============================================================
+Each run:
 
-Operating System: Windows
+1. Identifies the machine as `<hostname>-<hash>` (a short hash of hostname + MAC address).
+2. Runs `bunx ccusage daily|weekly|monthly --json`.
+3. Inserts or updates one row per period for this machine in `usage_tracker.xlsx`,
+   leaving other machines' rows alone, and recalculates the `TOTALS` row.
+4. Rebuilds the **Machine Totals** sheet from the Daily sheet and prints a summary.
 
-Fetching usage totals from ccusage...
-
-Fetching daily totals from ccusage...
-✓ Fetched daily totals
-Fetching weekly totals from ccusage...
-✓ Fetched weekly totals
-Fetching monthly totals from ccusage...
-✓ Fetched monthly totals
-
-Updating Excel file...
-
-✓ Updated Daily sheet (Windows + Combined)
-✓ Updated Weekly sheet (Windows + Combined)
-✓ Updated Monthly sheet (Windows + Combined)
-
-✓ Saved to usage_tracker.xlsx
-
-Last updated: 2025-12-14 14:23:45
-
-============================================================
-Current Totals (All Time):
-============================================================
-
-Daily Totals:
-------------------------------------------------------------
-  Windows:
-    Total Tokens: 580,255,768
-    Total Cost: $400.45
-
-  macOS:
-    Total Tokens: 600,255,767
-    Total Cost: $418.46
-
-  **Combined:**
-    Total Tokens: 1,180,511,535
-    Total Cost: $818.91
-
-Weekly Totals:
-------------------------------------------------------------
-  Windows:
-    Total Tokens: 350,120,000
-    Total Cost: $245.32
-
-  macOS:
-    Total Tokens: 400,114,123
-    Total Cost: $278.13
-
-  **Combined:**
-    Total Tokens: 750,234,123
-    Total Cost: $523.45
-
-Monthly Totals:
-------------------------------------------------------------
-  Windows:
-    Total Tokens: 450,228,394
-    Total Cost: $314.41
-
-  macOS:
-    Total Tokens: 500,228,395
-    Total Cost: $349.41
-
-  **Combined:**
-    Total Tokens: 950,456,789
-    Total Cost: $663.82
-
-============================================================
-Done! You can now commit and push to GitHub:
-  git add usage_tracker.xlsx
-  git commit -m "Update usage totals from Windows"
-  git push
-============================================================
-```
-
-## Excel File Structure
-
-Each sheet (Daily, Weekly, Monthly) contains **three rows**:
-
-### Row Structure:
-1. **Windows** - Usage from Windows machine
-2. **macOS** - Usage from macOS machine
-3. **Combined** - Sum of Windows + macOS (highlighted in yellow)
-
-### Columns (same for all sheets):
-| OS | Input Tokens | Output Tokens | Cache Creation Tokens | Cache Read Tokens | Total Tokens | Cost ($) | Last Updated |
-
-### Example Daily Sheet:
-| OS | Input Tokens | Output Tokens | Cache Creation Tokens | Cache Read Tokens | Total Tokens | Cost ($) | Last Updated |
-|----|--------------|---------------|-----------------------|-------------------|--------------|----------|--------------|
-| Windows | 750,000 | 710,000 | 42,500,000 | 546,000,000 | 590,000,000 | 412.34 | 2025-12-14 10:30:15 |
-| macOS | 749,984 | 710,937 | 42,669,823 | 546,420,791 | 590,511,535 | 406.57 | 2025-12-14 14:23:45 |
-| **Combined** | **1,499,984** | **1,420,937** | **85,169,823** | **1,092,420,791** | **1,180,511,535** | **818.91** | 2025-12-14 14:23:45 |
-
-## How It Works
-
-### Cross-Platform Tracking
-
-1. **On Windows**:
-   - Script fetches Windows usage from `bunx ccusage`
-   - Updates the "Windows" row
-   - Recalculates "Combined" row (Windows + macOS)
-
-2. **On macOS**:
-   - Script fetches macOS usage from `bunx ccusage`
-   - Updates the "macOS" row
-   - Recalculates "Combined" row (Windows + macOS)
-
-3. **Combined Totals**:
-   - Automatically calculated by summing Windows + macOS rows
-   - Shows your total usage across both systems
-   - Highlighted in yellow for easy visibility
-
-### GitHub Workflow
-
-Since both OS share the same Excel file via GitHub:
-
-1. Run script on Windows → Updates Windows row
-2. Commit and push to GitHub
-3. Pull on macOS → Get latest Windows data
-4. Run script on macOS → Updates macOS row, Combined is recalculated with both
-5. Commit and push back to GitHub
-
-## GitHub Workflow
-
-### Initial Setup
+Commit the workbook after each run and pull before running on another machine, so every
+machine's rows end up in the same file:
 
 ```bash
-# Initialize git if not already done
-git init
-
-# Add files
-git add track_usage.py requirements.txt README.md .gitignore usage_tracker.xlsx
-
-# Commit
-git commit -m "Initial commit: AI usage tracker"
-
-# Push to GitHub
-git remote add origin YOUR_GITHUB_REPO_URL
-git push -u origin main
-```
-
-### Regular Updates
-
-**On Windows:**
-```bash
-# Update Windows usage
-python track_usage.py
-
-# Commit and push
-git add usage_tracker.xlsx
-git commit -m "Update usage totals from Windows"
-git push
-```
-
-**On macOS:**
-```bash
-# Pull latest data (includes Windows updates)
 git pull
-
-# Update macOS usage
 python track_usage.py
-
-# Commit and push
 git add usage_tracker.xlsx
-git commit -m "Update usage totals from macOS"
+git commit -m "Update usage totals"
 git push
 ```
 
-**Back on Windows:**
-```bash
-# Pull latest data (includes macOS updates)
-git pull
+## Workbook layout
 
-# Run to update Windows again
-python track_usage.py
+| Sheet | Columns |
+|---|---|
+| Daily, Weekly | Date, Machine, Tokens, Cost ($) |
+| Monthly | Date, Machine, Tokens, API Cost ($), Subscription ($), Savings ($) |
+| Machine Totals | Machine, Tokens, Cost ($) |
 
-# Commit and push
-git add usage_tracker.xlsx
-git commit -m "Update usage totals from Windows"
-git push
-```
+Each time sheet ends with a `TOTALS` row. On the Monthly sheet, the $200 subscription for a
+month is split evenly across that month's machine rows, and Savings is API cost minus that
+share, so the totals row compares total API cost with $200 × number of months. Change
+`MONTHLY_SUBSCRIPTION` in `track_usage.py` if your plan differs.
 
-The Combined row always shows the sum of both systems!
-
-## What Gets Tracked
-
-The script fetches the "totals" section from each ccusage command:
-
-- **Daily totals**: Aggregate of all your usage on that OS
-- **Weekly totals**: Aggregate of all your weekly usage on that OS
-- **Monthly totals**: Aggregate of all your monthly usage on that OS
-- **Combined**: Sum of Windows + macOS for complete picture
+`dashboard.html` is a Chart.js dashboard (cost by machine, machine breakdown) with a snapshot
+of the tracked data embedded in the file; the script does not regenerate it.
 
 ## Troubleshooting
 
-### "bunx command not found"
+**`bunx` command not found**: make sure `bunx` is installed and on your PATH (`bunx --version`).
 
-Make sure `bunx` is installed and in your PATH. Test by running:
-```bash
-bunx --version
-```
+**`ccusage` not found**: check that `bunx ccusage --help` works.
 
-### "ccusage not found"
+**"Cannot save - usage_tracker.xlsx is open in another program"**: close the file in Excel and
+run again.
 
-Make sure you have access to the `ccusage` command via bunx:
-```bash
-bunx ccusage --help
-```
-
-### Permission errors on Excel file
-
-If the Excel file is open in another program, close it before running the script.
-
-### Git merge conflicts
-
-If you get merge conflicts on `usage_tracker.xlsx`:
-1. Accept one version (doesn't matter which)
-2. Run the script on each OS again
-3. Both rows will be updated correctly
-4. Commit the resolved version
-
-### One OS showing zeros
-
-This is normal if you haven't run the script on that OS yet. Just run it on the other machine and the row will populate.
-
-## Notes
-
-- The Excel file is small and safe to commit to GitHub
-- Each OS has its own row, preserving separate tracking
-- Combined row is always the sum of both OS rows
-- Each run updates the current OS and recalculates Combined
-- Simple and clean - per-OS breakdown plus total!
+**Git merge conflicts on `usage_tracker.xlsx`**: accept either version, run the script again on
+each machine so its rows are rewritten, then commit the result.
 
 ## License
 
